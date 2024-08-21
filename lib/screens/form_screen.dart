@@ -1,9 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mysql1/mysql1.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
@@ -22,29 +18,22 @@ class _FormScreenState extends State<FormScreen> {
   List<Map<String, dynamic>> _formatosFormularios = [];
   Map<int, TextEditingController> _respuestasControllers = {};
   late Box responseBox;
-  late Box projectBox;
-  final String apiUrl = 'https://www.pythonanywhere.com/user/aaalfred/shares/c37b1dc2d5094eb481e39c962918e426/';
-  String projectName = '';
-  final _storage = FlutterSecureStorage();
 
   @override
   void initState() {
     super.initState();
-    openBoxes();
     _loadProjectData();
+    _openBox();
+  }
+
+  Future<void> _openBox() async {
+    responseBox = await Hive.openBox('offline_responses_${widget.projectId}');
   }
 
   @override
   void dispose() {
     _respuestasControllers.values.forEach((controller) => controller.dispose());
     super.dispose();
-  }
-
-  Future<void> openBoxes() async {
-    responseBox = await Hive.openBox('offline_responses_${widget.projectId}');
-    projectBox = await Hive.openBox('project_data');
-    projectName = projectBox.get('project_name', defaultValue: 'Proyecto Desconocido');
-    setState(() {});
   }
 
   Future<void> _loadProjectData() async {
@@ -72,7 +61,7 @@ class _FormScreenState extends State<FormScreen> {
         }).toList();
 
         _respuestasControllers = Map.fromEntries(
-          _formatosFormularios.map((formato) => MapEntry(formato['id'], TextEditingController()))
+            _formatosFormularios.map((formato) => MapEntry(formato['id'], TextEditingController()))
         );
 
         _isLoading = false;
@@ -87,7 +76,7 @@ class _FormScreenState extends State<FormScreen> {
     }
   }
 
-  Future<bool> checkInternetConnection() async {
+  Future<bool> _checkInternetConnection() async {
     var connectivityResult = await (Connectivity().checkConnectivity());
     return connectivityResult != ConnectivityResult.none;
   }
@@ -98,7 +87,7 @@ class _FormScreenState extends State<FormScreen> {
       _errorMessage = null;
     });
 
-    bool isConnected = await checkInternetConnection();
+    bool isConnected = await _checkInternetConnection();
 
     if (isConnected) {
       try {
@@ -115,8 +104,8 @@ class _FormScreenState extends State<FormScreen> {
           String respuesta = _respuestasControllers[id]?.text ?? '';
 
           await conn.query(
-            'INSERT INTO respuestas (respuesta) VALUES (?)',
-            [respuesta]
+              'INSERT INTO respuestas (proyecto_id, formulario_id, respuesta) VALUES (?, ?, ?)',
+              [widget.projectId, id, respuesta]
           );
         }
 
@@ -165,102 +154,47 @@ class _FormScreenState extends State<FormScreen> {
     for (var controller in _respuestasControllers.values) {
       controller.clear();
     }
-    setState(() {}); // Actualizar la UI para reflejar los campos vacíos
-  }
-
-  Future<void> _sincronizarRespuestasLocales() async {
-    bool isConnected = await checkInternetConnection();
-    if (!isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No hay conexión a internet')),
-      );
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final conn = await MySqlConnection.connect(ConnectionSettings(
-        host: '72.167.33.202',
-        port: 3306,
-        user: 'alfred',
-        db: 'idinamicsdb',
-        password: 'aaabcde1409',
-      ));
-
-      for (var i = 0; i < responseBox.length; i++) {
-        List<Map<String, dynamic>> respuestas = responseBox.getAt(i);
-        for (var respuesta in respuestas) {
-          await conn.query(
-            'INSERT INTO respuestas (respuesta) VALUES (?)',
-            [respuesta['respuesta']]
-          );
-        }
-        await responseBox.deleteAt(i);
-        i--; // Ajustar el índice ya que eliminamos un elemento
-      }
-
-      await conn.close();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Respuestas sincronizadas exitosamente')),
-      );
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Error al sincronizar las respuestas: $e';
-      });
-    }
-
-    setState(() {
-      _isLoading = false;
-    });
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Formulario - $projectName'),
+        title: Text('Formulario del Proyecto'),
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text('ID del Proyecto: ${widget.projectId}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 20),
-                    if (_errorMessage != null)
-                      Text(_errorMessage!, style: TextStyle(color: Colors.red)),
-                    ..._formatosFormularios.map((formato) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(formato['pregunta'], style: TextStyle(fontWeight: FontWeight.bold)),
-                        TextField(
-                          controller: _respuestasControllers[formato['id']],
-                          decoration: InputDecoration(labelText: 'Respuesta'),
-                        ),
-                        SizedBox(height: 10),
-                      ],
-                    )).toList(),
-                    SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _enviarRespuestas,
-                      child: Text('Enviar Respuestas'),
-                    ),
-                    SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _sincronizarRespuestasLocales,
-                      child: Text('Sincronizar Respuestas Locales'),
-                    ),
-                  ],
-                ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('ID del Proyecto: ${widget.projectId}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              SizedBox(height: 20),
+              if (_errorMessage != null)
+                Text(_errorMessage!, style: TextStyle(color: Colors.red)),
+              ..._formatosFormularios.map((formato) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(formato['pregunta'], style: TextStyle(fontWeight: FontWeight.bold)),
+                  TextField(
+                    controller: _respuestasControllers[formato['id']],
+                    decoration: InputDecoration(labelText: 'Respuesta'),
+                  ),
+                  SizedBox(height: 10),
+                ],
+              )).toList(),
+              SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _enviarRespuestas,
+                child: Text('Enviar Respuestas'),
               ),
-            ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
